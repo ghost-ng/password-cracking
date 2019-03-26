@@ -62,7 +62,7 @@ def file_checks(file,type):
 
 def start_cracking(input_file,dict_file):
     filename = ''
-    print(BLINK + "[*] Time to get jazzy....please be patient, this may take a while!" + RSTCOLORS)
+    print(BLINK + "[*] Please be patient, this may take a while!" + RSTCOLORS)
     count = 0
 
     if args.single_hash is False:
@@ -105,8 +105,8 @@ def start_cracking(input_file,dict_file):
                     print(WHITE + "[*] Trying {hash:password_hash} " + hash + ":" + password_hash + RSTCOLORS)
                 if password_hash.rstrip() == hash.rstrip():
                     print("[+] Cracked: {}::{}".format(password,hash))
-                    break
-            sys.exit(0)
+
+                    sys.exit(0)
         print("[-] No matched found!")
 
 
@@ -127,9 +127,7 @@ ___/|____-_|____________|__|_____|____@'___|__@'_@'_@'___|_|______@'___|___|__
 __|_/_\__4_|___|_______@'__|____O'_________|____________O'_|__________@'___|__
 ___\|/_____|___|___________|_______________|_______________|_______________|__
     /         O'                                                  
-                              ***************
-                              *  get-jazzy  *
-                              ***************
+                              
 """
     print(banner_art)
 
