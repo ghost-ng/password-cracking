@@ -17,7 +17,9 @@ WHITE = '\033[37m'
 BLINK = '\033[5m'
 
 #Create queue
-queue = queue.Queue(30)
+worker_queue = queue.Queue(30)
+results_queue = queue.Queue()
+#TODO###Make a new queue for re-use
 threads =[]
 dictionary =""
 successes = [] ##list of tuples  [(hash,password),(hash,password)]
@@ -26,33 +28,25 @@ lock = threading.Lock()
 
 class ThreadClass(threading.Thread):
     global save_file
-    global successes
+    global results_queue
     def __init__(self, queue):
         threading.Thread.__init__(self)
     #Assign thread working with queue
-        self.queue = queue
-        self._stopevent = threading.Event()
-        self._sleepperiod = 1.0
-
-
-    def join(self, timeout=None):
-        """ Stop the thread. """
-        self._stopevent.set()
-        threading.Thread.join(self, timeout)
+        self.worker_queue = worker_queue
 
     def run(self):
         found = False
-        q_done = False
-        while q_done is not True:
-            if self.queue.empty():
+        done = False
+        while done is not True:
+            if self.worker_queue.empty():
                 if args.debug:
-                    print("[Debug] Queue is empty, Quitting...")
-                    #self.queue.join()
+                    print("[Debug {}] Queue is empty, Quitting...".format(self.getName()))
+                    #self.worker_queue.join()
                     self.thread.join()
                     break
             else:
                 if args.debug:
-                    print("[Debug] Current Queue Size:",self.queue.qsize())
+                    print("[Debug {}] Current Queue Size: {}".format(self.getName(),self.worker_queue.qsize()))
 
 
         #Get from queue job
@@ -60,45 +54,50 @@ class ThreadClass(threading.Thread):
             #print(type(self.queue.get()))
             #print("[Debug] Current Queue Size:", self.queue.qsize())
             try:
-                (hash,username) = self.queue.get()
+                (hash,username) = self.worker_queue.get()
             except TypeError as e:
                 if args.debug:
-                    print("[Debug] Unable to retrieve from queue:")
-                    print(e)
+                    print("[Debug {}] Unable to retrieve from queue:".format(self.getName()))
+                    print("Error:",e)
             try:
-                self.queue.task_done()
+                self.worker_queue.task_done()
             except ValueError as e:
                 if args.debug:
-                    print("[Debug] Unable to end task, may be already done.  Error:")
+                    print("[Debug {}] Unable to end task, may be already done.  Error:",self.getName())
                     print(e)
             if args.debug:
-                print("[Debug] {} Retrieved From Queue: {}".format(self.getName(),(hash,username)))
-            if len(successes) > 0:
+                print("[Debug {}] {} Retrieved From Queue: {}".format(self.getName(),self.getName(),(hash,username)))
+            if results_queue.qsize() > 0:
                 if args.verbose:
                     print("[*] {}: Checking known matches first".format(self.getName()))
-                for hash_cracked, password_cracked in successes:
+                for hash_cracked, password_cracked in list(results_queue.queue):
                     if args.debug:
-                        print("[Debug] Comparing: Prev Found: {} - New Password Hash: {}".format(hash_cracked,hash))
+                        print("[Debug {}] Comparing: Prev Found: {} - New Password Hash: {}".format(self.getName(),hash_cracked,hash))
                     if hash.upper() == hash_cracked.upper():
                         #result = "{} {}:{}".format(self.getName(), username, password.rstrip())
                         result = "{}:{}".format(username, password.rstrip())
-                        if args.verbose:
-                            print("[+] Match Found:", result)
-                        if args.stdout:
-                            print(result)
+                        if args.verbose or args.debug:
+                            print(GREEN+"[+] Match Found in Previous Cracked Hashes: {}{}".format(result,RSTCOLORS))
+                        ##TODO LOAD INTO A NEW QUEUE THEN GRAB FROM THE QUEUE TO PRINT
+
+                        #if args.stdout:
+                         #   lock.acquire()
+                          #  sleep(.2)
+                           # print(result)
+                            #lock.release()
                         found = True
                         self.finish_tasks()
                         break
                 if found is False and args.debug is True:
-                    print("[Debug] Did not find a match in previously cracked hashes")
+                    print("[Debug {}] Did not find a match in previously cracked hashes".format(self.getName()))
             if found is False:
                 with open(dictionary, "r", encoding="utf-8") as dict_file:
                     for password in dict_file:
                         if args.debug:
-                            print("[Debug] Retrieved {} from dictionary".format(password.rstrip()))
+                            print("[Debug {}] Retrieved {} from dictionary".format(self.getName(),password.rstrip()))
                         password_hash = create_hash(password.rstrip())
                         if args.debug:
-                            print("[Debug] Returned hash: {}".format(password_hash))
+                            print("[Debug {}] Returned hash: {}".format(self.getName(),password_hash))
                         if args.verbose:
                             print("[*] Comparing: Loaded Hash - {}; Wordlist Hash - {}".format(hash.upper(), password_hash.upper()))
                         if hash.upper() == password_hash.upper():
@@ -106,11 +105,19 @@ class ThreadClass(threading.Thread):
                             result = "{}:{}".format(username,password.rstrip())
                             if args.verbose:
                                 print("[+] Match Found:",result)
-                            if args.stdout:
-                                print(result)
+
+                            ##TODO LOAD INTO A NEW QUEUE THEN GRAB FROM THE QUEUE TO PRINT
+                            #if args.stdout:
+                            #    lock.acquire()
+                             #   sleep(.2)
+                              #  print(result)
+                               # lock.release()
                             #save_file.write(result + "\n")
                             #lock.acquire()
-                            successes.append((hash,password.rstrip()))        #all matches get added to a list
+                            results_queue.put((hash,password.rstrip()))        #all matches get added to a list
+                            if args.debug:
+                                print("[Debug {}] Loaded match to results_queue".format(self.getName()))
+                                print("[Debug {}] Current size of results_queue: {}".format(self.getName(),results_queue.qsize()))
                             #lock.release()
 
                             dict_file.seek(0)
@@ -118,14 +125,31 @@ class ThreadClass(threading.Thread):
                             break
 
                 self.finish_tasks()
+
+            if self.worker_queue.empty() is True:
+                done = True
+                if args.debug:
+                    print("[Debug {}] Ending Thread...".format(self.getName()))
+
             #q_done = True
 
     def finish_tasks(self):
         try:
-            self.queue.task_done()
+            self.worker_queue.task_done()
         except:
             if args.debug:
-                print("[Debug] Unable to finish task")
+                print("[Debug {}] Unable to finish task".format(self.getName()))
+
+
+def convert_queue_to_list(q):
+    print(list(q.queue))
+    temp_q = q
+    output = []
+    while temp_q.qsize() > 0:
+        output.append(temp_q.get())
+    if args.debug:
+        print("[Debug] Queue:\n",output)
+    return output
 
 def spawn_threads(num_threads):
     if args.verbose:
@@ -146,9 +170,10 @@ def kill_threads(num_threads):
         print("[Debug] Killing Threads")
     for i in range(num_threads):
         queue.put(None)
-    print("[*] Emptied Queue")
+    #print("[*] Emptied Queue")
     for i in threads:
-        i.self.join()
+        i.join()
+        #print("Joined Threads")
         if args.debug:
             print("[Debug] Killed",i)
         #i.is_alive()
@@ -179,12 +204,12 @@ def load_hashes(hash_file):
         for line in hash_file:
             hash,username = extract_hash_from_line(line)
             # Put line to queue
-            queue.put((hash,username))
+            worker_queue.put((hash,username))
             count += 1
     if args.verbose:
         print("[+] Loaded {} hashes for cracking".format(count))
     if args.debug:
-        print("[Debug] Queue Size:",queue.qsize())
+        print("[Debug] Queue Size:",worker_queue.qsize())
 
 #####BEGIN FILE FUNCTIONS#####
 ##############################
@@ -338,17 +363,25 @@ pre-formatted:
         load_hashes(input_file)             #load hashes into the worker queue
         with open(new_cracked_file,'w',encoding='utf-8') as save_file:
             spawn_threads(args.num_threads)     #spawn worker threads
-        print("[*] Joining Queues...")
-        queue.join()
-        print("[*] Killing Threads...")
-        kill_threads(len(threads))
+        #print("[*] Joining Queues...")
+        worker_queue.join()
+        #print("[*] Killing Threads...")
+        #kill_threads(len(threads))
     #start_cracking(input_file, dict_file)
 
 
 try:
     main()
-    #print("Done!")
-    sys.exit(0)
+    sleep(1)
+    print("Done!")
+    sleep(2)
+    for item in list(results_queue.queue):
+        print(item)
+    if args.debug:
+        sleep(2)
+        print("[Debug] Matches:")
+        print(list(results_queue.queue))
+    #sys.exit(0)
 except KeyboardInterrupt:
     print("\n[!] Quitting...")
     sys.exit(0)
